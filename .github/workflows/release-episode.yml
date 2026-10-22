@@ -1,0 +1,43 @@
+name: Release episode
+
+# The daily Liuwa Pod routine cannot create releases itself (its GitHub proxy
+# refuses release calls), but it can push a branch. It pushes episode/ep<n>
+# holding the MP3 and a release.json ({"name": ..., "body": ...}). This
+# workflow turns that branch into release ep<n> with the MP3 attached, then
+# deletes the branch so the repository stays small.
+
+on:
+  push:
+    branches: ['episode/**']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create the release from the branch contents
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#episode/}"
+          mp3=$(ls *.mp3 | head -1)
+          [ -n "$mp3" ] || { echo "::error::no .mp3 on branch $GITHUB_REF_NAME"; exit 1; }
+          title=$(jq -r '.name // empty' release.json 2>/dev/null || true)
+          notes=$(jq -r '.body // empty' release.json 2>/dev/null || true)
+          [ -n "$title" ] || title="Liuwa Pod $tag"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$mp3" --clobber
+          else
+            gh release create "$tag" "$mp3" --target main --title "$title" --notes "$notes"
+          fi
+          echo "release $tag: $mp3"
+
+      - name: Delete the episode branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${GITHUB_REF_NAME}"

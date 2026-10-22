@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
 
 jobs:
   release:
@@ -36,6 +37,27 @@ jobs:
             gh release create "$tag" "$mp3" --target main --title "$title" --notes "$notes"
           fi
           echo "release $tag: $mp3"
+
+      - name: Mirror the latest episodes to the audio branch (GitHub Pages serves them as audio/mpeg)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mp3=$(ls *.mp3 | head -1)
+          work=$(mktemp -d)
+          if git fetch -q origin audio 2>/dev/null; then git archive origin/audio | tar -x -C "$work"; fi
+          cp "$mp3" "$work/"
+          cd "$work"
+          touch .nojekyll
+          printf '%s\n' '<!doctype html><meta charset="utf-8"><title>Liuwa Pod audio</title><p>Audio files for <a href="https://liuwa.co.zm/pod/">Liuwa Pod</a>. Episodes are also archived as releases of this repository.' > index.html
+          ls *.mp3 | sort | head -n -60 | xargs -r rm -f
+          git init -q -b audio
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "audio: $(ls *.mp3 | wc -l | tr -d ' ') episodes, latest $mp3"
+          git push -q --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" audio:audio
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds" >/dev/null || echo "pages build request failed (the push may build on its own)"
 
       - name: Delete the episode branch
         env:

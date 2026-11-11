@@ -2,9 +2,10 @@ name: Release episode
 
 # The daily Liuwa Pod routine cannot create releases itself (its GitHub proxy
 # refuses release calls), but it can push a branch. It pushes episode/ep<n>
-# holding the MP3 and a release.json ({"name": ..., "body": ...}). This
-# workflow turns that branch into release ep<n> with the MP3 attached, then
-# deletes the branch so the repository stays small.
+# holding the MP3, a release.json ({"name": ..., "body": ...}) and, since
+# Ep 24, the morning poster (a PNG). This workflow turns that branch into
+# release ep<n> with the MP3 and the poster attached, mirrors both to the audio
+# branch, then deletes the branch so the repository stays small.
 
 on:
   push:
@@ -28,15 +29,16 @@ jobs:
           tag="${GITHUB_REF_NAME#episode/}"
           mp3=$(ls *.mp3 | head -1)
           [ -n "$mp3" ] || { echo "::error::no .mp3 on branch $GITHUB_REF_NAME"; exit 1; }
+          png=$(ls *.png 2>/dev/null | head -1 || true)
           title=$(jq -r '.name // empty' release.json 2>/dev/null || true)
           notes=$(jq -r '.body // empty' release.json 2>/dev/null || true)
           [ -n "$title" ] || title="Liuwa Pod $tag"
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$mp3" --clobber
+            gh release upload "$tag" "$mp3" $png --clobber
           else
-            gh release create "$tag" "$mp3" --target main --title "$title" --notes "$notes"
+            gh release create "$tag" "$mp3" $png --target main --title "$title" --notes "$notes"
           fi
-          echo "release $tag: $mp3"
+          echo "release $tag: $mp3 $png"
 
       - name: Mirror the latest episodes to the audio branch (GitHub Pages serves them as audio/mpeg)
         env:
@@ -47,10 +49,12 @@ jobs:
           work=$(mktemp -d)
           if git fetch -q origin audio 2>/dev/null; then git archive origin/audio | tar -x -C "$work"; fi
           cp "$mp3" "$work/"
+          ls *.png >/dev/null 2>&1 && cp *.png "$work/"
           cd "$work"
           touch .nojekyll
           printf '%s\n' '<!doctype html><meta charset="utf-8"><title>Liuwa Pod audio</title><p>Audio files for <a href="https://liuwa.co.zm/pod/">Liuwa Pod</a>. Episodes are also archived as releases of this repository.' > index.html
           ls *.mp3 | sort | head -n -60 | xargs -r rm -f
+          (ls *.png 2>/dev/null || true) | sort | head -n -60 | xargs -r rm -f
           git init -q -b audio
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
